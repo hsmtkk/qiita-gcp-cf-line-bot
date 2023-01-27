@@ -22,6 +22,12 @@ class MyStack extends TerraformStack {
       accountId: 'function-runner',
     });
 
+    new google.projectIamMember.ProjectIamMember(this, 'functionRunnerSecretAccessor', {
+      member: `serviceAccount:${functionRunner.email}`,
+      project,
+      role: 'roles/secretmanager.secretAccessor',
+    });
+
     const allUsersRunInvoker = new google.dataGoogleIamPolicy.DataGoogleIamPolicy(this, 'allUsersRunInvoker', {
       binding: [{
         members: ['allUsers'],
@@ -69,6 +75,61 @@ class MyStack extends TerraformStack {
       location: region,
       policyData: allUsersRunInvoker.policyData,
       service: simpleFunction.name,
+    });
+
+    const parrotChannelAccessToken = new google.secretManagerSecret.SecretManagerSecret(this, 'parrotChannelAccessToken', {
+      secretId: 'parrotChannelAccessToken',
+      replication: {
+        automatic: true,
+      },
+    });
+
+    new google.secretManagerSecretVersion.SecretManagerSecretVersion(this, 'parrotChannelAccessTokenVersion', {
+      secret: parrotChannelAccessToken.name,
+      secretData: 'dummy',
+    });
+
+    const parrotAsset = new TerraformAsset(this, 'parrotAsset', {
+      path: path.resolve('parrot'),
+      type: AssetType.ARCHIVE,
+    });
+
+    const parrotObject = new google.storageBucketObject.StorageBucketObject(this, 'parrotObject', {
+      bucket: assetBucket.name,
+      name: parrotAsset.assetHash,
+      source: parrotAsset.path,
+    });
+
+    const parrotFunction = new google.cloudfunctions2Function.Cloudfunctions2Function(this, 'parrotFunction', {
+      name: 'parrot',
+      buildConfig: {
+        entryPoint: 'parrot',
+        runtime: 'go119',
+        source: {
+          storageSource: {
+            bucket: assetBucket.name,
+            object: parrotObject.name,
+          },
+        },
+      },
+      location: region,
+      serviceConfig: {
+        secretEnvironmentVariables: [{
+          key: 'CHANNEL_ACCESS_TOKEN',
+          projectId: project,
+          secret: parrotChannelAccessToken.secretId,
+          version: 'latest',
+        }],
+        minInstanceCount: 0,
+        maxInstanceCount: 0,
+        serviceAccountEmail: functionRunner.email,
+      },
+    });
+
+    new google.cloudRunServiceIamPolicy.CloudRunServiceIamPolicy(this, 'parrotFunctionNoAuth', {
+      location: region,
+      policyData: allUsersRunInvoker.policyData,
+      service: parrotFunction.name,
     });
 
   }
