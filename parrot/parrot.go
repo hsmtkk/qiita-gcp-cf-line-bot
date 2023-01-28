@@ -2,6 +2,9 @@ package parrot
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -44,9 +47,20 @@ func parrot(w http.ResponseWriter, r *http.Request) {
 	log.Print("dump HTTP request")
 	log.Print(string(dumpReq))
 
-	events, err := receive(r)
+	reqBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("failed to read request body; %v", err.Error())
+	}
+	defer r.Body.Close()
+
+	valid := validate(r.Header, reqBytes)
+	if !valid {
+		log.Fatalf("invalid request")
+	}
+
+	var events MessageEvents
+	if err := json.Unmarshal(reqBytes, &events); err != nil {
+		log.Fatalf("failed to decode JSON; %v", err.Error())
 	}
 
 	if len(events.Events) == 0 {
@@ -61,21 +75,6 @@ func parrot(w http.ResponseWriter, r *http.Request) {
 	if _, err := w.Write([]byte("OK")); err != nil {
 		log.Fatalf("failed to write response; %v", err.Error())
 	}
-}
-
-func receive(r *http.Request) (MessageEvents, error) {
-	var events MessageEvents
-	reqBytes, err := io.ReadAll(r.Body)
-	if err != nil {
-		return events, fmt.Errorf("failed to read request body; %w", err)
-	}
-	defer r.Body.Close()
-
-	if err := json.Unmarshal(reqBytes, &events); err != nil {
-		return events, fmt.Errorf("failed to decode JSON; %w", err)
-	}
-
-	return events, nil
 }
 
 func reply(replyToken, text string) error {
@@ -118,4 +117,15 @@ func reply(replyToken, text string) error {
 		return fmt.Errorf("got error HTTP response; %d; %s", resp.StatusCode, resp.Status)
 	}
 	return nil
+}
+
+func validate(header http.Header, reqBytes []byte) bool {
+	want := []byte(header.Get("x-line-signature"))
+	channelSecret := os.Getenv("CHANNEL_SECRET")
+	mac := hmac.New(sha256.New, []byte(channelSecret))
+	mac.Write(reqBytes)
+	got := []byte(base64.StdEncoding.EncodeToString(mac.Sum(nil)))
+	log.Printf("want HMAC-SHA256 %s", string(want))
+	log.Printf("got  HMAC-SHA256 %s", string(got))
+	return hmac.Equal(want, got)
 }

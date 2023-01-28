@@ -89,6 +89,18 @@ class MyStack extends TerraformStack {
       secretData: 'dummy',
     });
 
+    const parrotChannelSecret = new google.secretManagerSecret.SecretManagerSecret(this, 'parrotChannelSecret', {
+      secretId: 'parrotChannelSecret',
+      replication: {
+        automatic: true,
+      },
+    });
+
+    new google.secretManagerSecretVersion.SecretManagerSecretVersion(this, 'parrotChannelSecretVersion', {
+      secret: parrotChannelSecret.name,
+      secretData: 'dummy',
+    });
+
     const parrotAsset = new TerraformAsset(this, 'parrotAsset', {
       path: path.resolve('parrot'),
       type: AssetType.ARCHIVE,
@@ -119,7 +131,13 @@ class MyStack extends TerraformStack {
           projectId: project,
           secret: parrotChannelAccessToken.secretId,
           version: 'latest',
-        }],
+        },
+        {
+          key: 'CHANNEL_SECRET',
+          projectId: project,
+          secret: parrotChannelSecret.secretId,
+          version: 'latest',
+        },],
         minInstanceCount: 0,
         maxInstanceCount: 0,
         serviceAccountEmail: functionRunner.email,
